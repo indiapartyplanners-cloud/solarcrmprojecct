@@ -47,3 +47,15 @@ npm run build
 - `/admin` admin CRM (lead management)
 
 # solarcrmprojecct
+
+## Admin login + Firestore rules setup
+
+1. In Firebase Console, enable **Authentication > Sign-in method > Email/Password**.
+2. Create at least one admin user in **Authentication > Users**.
+3. Deploy `firestore.rules` so:
+   - Website visitors can submit forms (`create`)
+   - Only signed-in users can view/update leads in admin CRM
+4. If forms get stuck at submitting, check:
+   - Firestore database is created in project `solarproject-f1225`
+   - Firestore rules are deployed
+   - Browser network is not blocking Firebase requests

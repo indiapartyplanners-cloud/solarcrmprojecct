@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  type User,
+} from "firebase/auth";
+import {
   type Lead,
   type LeadStatus,
   subscribeToLeads,
   updateLeadStatus,
 } from "@/lib/leads";
+import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
@@ -13,17 +20,47 @@ const STATUS_OPTIONS: LeadStatus[] = ["new", "in_review", "closed"];
 
 const AdminCRM = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const { toast } = useToast();
 
   useEffect(() => {
-    const unsubscribe = subscribeToLeads((incomingLeads) => {
-      setLeads(incomingLeads);
-      setLoading(false);
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      setAdminUser(user);
+      setAuthLoading(false);
     });
 
-    return unsubscribe;
+    return unsubscribeAuth;
   }, []);
+
+  useEffect(() => {
+    if (!adminUser) {
+      setLeads([]);
+      setLeadsLoading(false);
+      return undefined;
+    }
+
+    setLeadsLoading(true);
+    setLoadError("");
+
+    const unsubscribe = subscribeToLeads(
+      (incomingLeads) => {
+        setLeads(incomingLeads);
+        setLeadsLoading(false);
+      },
+      (error) => {
+        setLeadsLoading(false);
+        setLoadError(error.message);
+      },
+    );
+
+    return unsubscribe;
+  }, [adminUser]);
 
   const counts = useMemo(
     () => ({
@@ -33,6 +70,33 @@ const AdminCRM = () => {
     }),
     [leads],
   );
+
+  const handleLogin = async () => {
+    if (!loginEmail || !loginPassword) {
+      toast({
+        title: "Missing credentials",
+        description: "Enter admin email and password.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSigningIn(true);
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      toast({ title: "Login successful", description: "Welcome to Admin CRM." });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to sign in.";
+      toast({
+        title: "Login failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
 
   const handleStatusChange = async (lead: Lead, status: LeadStatus) => {
     try {
@@ -47,6 +111,54 @@ const AdminCRM = () => {
     }
   };
 
+  const handleLogout = async () => {
+    await signOut(auth);
+    toast({ title: "Signed out", description: "Admin session ended." });
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen px-4 py-8">
+        <div className="mx-auto max-w-md rounded-xl border bg-card p-6 text-center">
+          Checking admin session...
+        </div>
+      </div>
+    );
+  }
+
+  if (!adminUser) {
+    return (
+      <div className="min-h-screen px-4 py-8">
+        <div className="mx-auto max-w-md space-y-4 rounded-xl border bg-card p-6">
+          <h1 className="text-2xl font-bold">Admin CRM Login</h1>
+          <p className="text-sm text-muted-foreground">
+            Sign in using your Firebase admin email and password.
+          </p>
+          <input
+            type="email"
+            className="w-full rounded-md border bg-background px-3 py-2"
+            placeholder="Admin email"
+            value={loginEmail}
+            onChange={(e) => setLoginEmail(e.target.value)}
+          />
+          <input
+            type="password"
+            className="w-full rounded-md border bg-background px-3 py-2"
+            placeholder="Password"
+            value={loginPassword}
+            onChange={(e) => setLoginPassword(e.target.value)}
+          />
+          <Button onClick={() => void handleLogin()} disabled={isSigningIn}>
+            {isSigningIn ? "Signing in..." : "Sign In"}
+          </Button>
+          <Link to="/" className="block text-sm text-solar-dim">
+            Back to website
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen px-4 py-8">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -56,10 +168,18 @@ const AdminCRM = () => {
             <p className="text-muted-foreground">
               Manage quote requests and contact inquiries from the website.
             </p>
+            <p className="text-xs text-muted-foreground">
+              Signed in as: {adminUser.email}
+            </p>
           </div>
-          <Link to="/">
-            <Button variant="outline">Back to Website</Button>
-          </Link>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => void handleLogout()}>
+              Sign Out
+            </Button>
+            <Link to="/">
+              <Button variant="outline">Back to Website</Button>
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
@@ -77,6 +197,12 @@ const AdminCRM = () => {
           </div>
         </div>
 
+        {loadError ? (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+            Failed to load leads: {loadError}
+          </div>
+        ) : null}
+
         <div className="overflow-x-auto rounded-xl border bg-card">
           <table className="min-w-full text-sm">
             <thead>
@@ -90,7 +216,7 @@ const AdminCRM = () => {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {leadsLoading ? (
                 <tr>
                   <td className="px-3 py-4 text-muted-foreground" colSpan={6}>
                     Loading leads...

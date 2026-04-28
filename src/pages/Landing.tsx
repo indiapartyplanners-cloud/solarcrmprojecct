@@ -72,10 +72,12 @@ const Landing = () => {
       } else {
         setContactForm(initialFormState);
       }
-    } catch (_error) {
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Please try again in a moment.";
       toast({
         title: "Submission failed",
-        description: "Please try again in a moment.",
+        description: message,
         variant: "destructive",
       });
     } finally {

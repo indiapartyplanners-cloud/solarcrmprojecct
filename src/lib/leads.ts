@@ -42,18 +42,32 @@ const COLLECTION_MAP: Record<LeadType, string> = {
   contact: "contactInquiries",
 };
 
+const LEAD_SUBMIT_TIMEOUT_MS = 15000;
+
 export const submitLead = async (payload: SubmitLeadInput) => {
   const collectionName = COLLECTION_MAP[payload.type];
-
-  await addDoc(collection(db, collectionName), {
+  const submitPromise = addDoc(collection(db, collectionName), {
     ...payload,
     status: "new",
     createdAt: serverTimestamp(),
   });
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(
+        new Error(
+          "Request timed out. Please check internet/Firestore rules and try again.",
+        ),
+      );
+    }, LEAD_SUBMIT_TIMEOUT_MS);
+  });
+
+  await Promise.race([submitPromise, timeoutPromise]);
 };
 
 export const subscribeToLeads = (
   callback: (leads: Lead[]) => void,
+  onError?: (error: Error) => void,
 ): Unsubscribe => {
   const quoteQuery = query(
     collection(db, COLLECTION_MAP.quote),
@@ -77,23 +91,35 @@ export const subscribeToLeads = (
     callback(merged);
   };
 
-  const unsubQuotes = onSnapshot(quoteQuery, (snapshot) => {
-    quoteLeads = snapshot.docs.map((leadDoc) => ({
-      id: leadDoc.id,
-      type: "quote",
-      ...(leadDoc.data() as Omit<Lead, "id" | "type">),
-    }));
-    emit();
-  });
+  const unsubQuotes = onSnapshot(
+    quoteQuery,
+    (snapshot) => {
+      quoteLeads = snapshot.docs.map((leadDoc) => ({
+        id: leadDoc.id,
+        type: "quote",
+        ...(leadDoc.data() as Omit<Lead, "id" | "type">),
+      }));
+      emit();
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 
-  const unsubContacts = onSnapshot(contactQuery, (snapshot) => {
-    contactLeads = snapshot.docs.map((leadDoc) => ({
-      id: leadDoc.id,
-      type: "contact",
-      ...(leadDoc.data() as Omit<Lead, "id" | "type">),
-    }));
-    emit();
-  });
+  const unsubContacts = onSnapshot(
+    contactQuery,
+    (snapshot) => {
+      contactLeads = snapshot.docs.map((leadDoc) => ({
+        id: leadDoc.id,
+        type: "contact",
+        ...(leadDoc.data() as Omit<Lead, "id" | "type">),
+      }));
+      emit();
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 
   return () => {
     unsubQuotes();
