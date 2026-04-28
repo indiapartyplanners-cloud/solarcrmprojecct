@@ -45,3 +45,5 @@ npm run build
 
 - `/` public solar website
 - `/admin` admin CRM (lead management)
+
+# solarcrmprojecct
